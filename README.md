@@ -46,13 +46,6 @@ This is a demo Project for Inshorts.
      - latitude
      - longitude
 
-### Bonus Requirement
-
-- Implement a location-based **Trending News Feed**
-- Simulate user interaction events such as views and clicks
-- Compute a trending score using interaction volume, recency, and geographic relevance
-- Add caching for trending feeds by location
-
 ### API Design Requirements
 
 - Follow RESTful API design principles
@@ -63,5 +56,7 @@ This is a demo Project for Inshorts.
 - Optionally include metadata such as total results, page number, and query used
 
 
-# High Level Design
+## High Level Design
+
+![Architecture Diagram](docs/images/highlevel.png)
 
