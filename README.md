@@ -63,8 +63,19 @@ User Facing APIs:
 1. For uploading news with a file:
 https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/upload
 
+POST Method, add news data as file
+
 2. For User querying news:
 https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/user_query
+
+Post Method 
+Sample Body/Payload:
+{
+    "queryText" : "Top news on AI"
+    "userId" : "userId-xyxz"
+}
+
+Simulated APIs/Internal Facing
 
 ![Architecture Diagram](docs/images/highlevel.png)
 
