@@ -1,8 +1,6 @@
-import json
-
 def lambda_handler(event, context):
-    # TODO implement
+    articles = event.get("articles", [])
     return {
-        'statusCode': 200,
-        'body': json.dumps('Hello from Lambda!')
+        "count": len(articles),
+        "articles": articles
     }

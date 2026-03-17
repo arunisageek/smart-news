@@ -15,7 +15,7 @@ ENDPOINT_PATHS = {
     "nearby": "/nearby"
 }
 
-DEFAULT_LIMIT = int(os.environ.get("DEFAULT_LIMIT", "20"))
+DEFAULT_LIMIT = int(os.environ.get("DEFAULT_LIMIT", "200"))
 HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "10"))
 
 

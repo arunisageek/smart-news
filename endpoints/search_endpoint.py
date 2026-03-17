@@ -101,14 +101,24 @@ def search_articles(cursor, query, source, category, limit_value):
     if source:
         where_clauses.append("lower(a.source_name) = lower(%(src)s)")
 
-    if category:
-        where_clauses.append("""
-            EXISTS (
-                SELECT 1
-                FROM unnest(a.category) AS c
-                WHERE lower(c) = lower(%(cat)s)
-            )
-        """)
+    # if category:
+    #     where_clauses.append("""
+    #         EXISTS (
+    #             SELECT 1
+    #             FROM unnest(a.category) AS c
+    #             WHERE lower(c) = lower(%(cat)s)
+    #         )
+    #     """)
+    # if category:
+    #     # Use ILIKE inside the unnest to allow partial matches like 'Tech' matching 'Technology'
+    #     where_clauses.append("""
+    #         EXISTS (
+    #             SELECT 1
+    #             FROM unnest(a.category) AS c
+    #             WHERE c ILIKE %(cat_pattern)s
+    #         )
+    #     """)
+    # param_dict["cat_pattern"] = f"%{category}%"
 
     query_sql = sql.SQL("""
         SELECT

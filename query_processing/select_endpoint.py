@@ -204,7 +204,9 @@ def lambda_handler(event, context):
     )
 
     primary_endpoint = choose_primary_endpoint(endpoint_candidates, filters)
+    print(f"Selected primary endpoint: {primary_endpoint}")
     ranking_mode = get_ranking_mode(primary_endpoint)
+    print(f"Set ranking mode: {ranking_mode}")
 
     return {
         "primaryEndpoint": primary_endpoint,
