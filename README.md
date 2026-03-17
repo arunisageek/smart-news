@@ -75,7 +75,41 @@ Sample Body/Payload:
     "userId" : "userId-xyxz"
 }
 
+Response
+{
+   "queryId" : "awcawef-cw12121-aw3ed23d"
+}
+
+3. For User querying status:
+https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/user_query_status
+GET Query Params:
+{
+   "queryId": "awcawef-cw12121-aw3ed23d"
+}
+
+Response:
+{
+   "status": "IN_PROCESS/FINISHED/FAILED",
+   
+   "status": {
+      statusCode: 200/500,
+      "result": {},
+      "error": {}
+   }
+}
+
+Post Method 
+Sample Body/Payload:
+{
+    "queryText" : "Top news on AI"
+    "userId" : "userId-xyxz"
+}
+
 ###Simulated APIs/Internal Facing
+
+1. https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/upload
+
+2. 
 
 ![Architecture Diagram](docs/images/highlevel.png)
 
