@@ -105,11 +105,38 @@ Sample Body/Payload:
     "userId" : "userId-xyxz"
 }
 
-###Simulated APIs/Internal Facing
+### Simualated:
 
-1. https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/upload
+1. Search https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/retrieve/search
 
-2. 
+GET
+
+Query Parameters
+
+2. Category https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/retrieve/category
+
+GET
+
+Query Parameters
+
+3. Score https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/retrieve/score
+
+GET
+
+Query Parameters
+
+4. Nearby https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/retrieve/nearby
+
+GET
+
+Query Parameters
+
+5. Source https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/retrieve/source
+
+GET
+
+Query Parameters
+
 
 ![Architecture Diagram](docs/images/highlevel.png)
 
