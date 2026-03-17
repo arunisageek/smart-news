@@ -58,7 +58,7 @@ This is a demo Project for Inshorts.
 
 ## High Level Design
 
-User Facing APIs:
+### User Facing APIs:
 
 1. For uploading news with a file:
 https://y0lm8uatmc.execute-api.us-west-2.amazonaws.com/prod/api/v1/news/upload
@@ -75,7 +75,7 @@ Sample Body/Payload:
     "userId" : "userId-xyxz"
 }
 
-Simulated APIs/Internal Facing
+###Simulated APIs/Internal Facing
 
 ![Architecture Diagram](docs/images/highlevel.png)
 

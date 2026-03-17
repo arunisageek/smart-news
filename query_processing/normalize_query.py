@@ -9,7 +9,7 @@ BEDROCK_REGION = os.environ.get("BEDROCK_REGION") or os.environ.get("AWS_REGION"
 
 bedrock = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
 
-ALLOWED_INTENTS = ["category", "score", "search", "source", "nearby"]
+ALLOWED_ENDPOINTS = ["category", "score", "search", "source", "nearby"]
 
 
 def extract_text_from_converse_response(response):
@@ -63,7 +63,7 @@ def coerce_string_list(value):
     return result
 
 
-def coerce_score(value):
+def coerce_float(value):
     if value is None:
         return None
 
@@ -82,48 +82,89 @@ def coerce_score(value):
     return None
 
 
-def validate_model_output(payload):
+def normalize_endpoint_candidates(value):
+    if not isinstance(value, list):
+        return []
+
+    result = []
+    seen = set()
+
+    for item in value:
+        if not isinstance(item, str):
+            continue
+
+        cleaned = item.strip().lower()
+        if cleaned not in ALLOWED_ENDPOINTS:
+            continue
+
+        if cleaned in seen:
+            continue
+
+        seen.add(cleaned)
+        result.append(cleaned)
+
+    return result
+
+
+def validate_model_output(payload, query_text):
     if not isinstance(payload, dict):
         raise ValueError("Model output must be a JSON object")
 
-    intents = payload.get("intents")
+    endpoint_candidates = normalize_endpoint_candidates(payload.get("endpointCandidates"))
     entities = payload.get("entities")
+    search_query = payload.get("searchQuery")
+    score_threshold = payload.get("scoreThreshold")
+    location = payload.get("location")
+    radius_km = payload.get("radiusKm")
 
-    if not isinstance(intents, list) or not intents:
-        raise ValueError("Model output must contain a non-empty intents array")
-
-    cleaned_intents = []
-    seen = set()
-
-    for intent in intents:
-        if not isinstance(intent, str):
-            continue
-
-        cleaned = intent.strip()
-        if cleaned not in ALLOWED_INTENTS:
-            raise ValueError(
-                f"Invalid intent returned by model: {cleaned}. Allowed values are: {ALLOWED_INTENTS}"
-            )
-
-        if cleaned not in seen:
-            seen.add(cleaned)
-            cleaned_intents.append(cleaned)
-
-    if not cleaned_intents:
-        raise ValueError("Model output did not contain any valid intents")
+    if not endpoint_candidates:
+        raise ValueError(
+            f"Model output must contain at least one valid endpoint candidate from: {ALLOWED_ENDPOINTS}"
+        )
 
     if not isinstance(entities, dict):
         entities = {}
 
+    normalized_entities = {
+        "people": coerce_string_list(entities.get("people")),
+        "organizations": coerce_string_list(entities.get("organizations")),
+        "locations": coerce_string_list(entities.get("locations")),
+        "events": coerce_string_list(entities.get("events")),
+        "sources": coerce_string_list(entities.get("sources")),
+        "categories": coerce_string_list(entities.get("categories"))
+    }
+
+    if isinstance(search_query, str):
+        search_query = search_query.strip()
+    else:
+        search_query = None
+
+    if not search_query and "search" in endpoint_candidates:
+        fallback_parts = []
+        fallback_parts.extend(normalized_entities["people"])
+        fallback_parts.extend(normalized_entities["organizations"])
+        fallback_parts.extend(normalized_entities["events"])
+
+        if fallback_parts:
+            search_query = " ".join(fallback_parts)
+        else:
+            search_query = query_text.strip()
+
+    if isinstance(location, str):
+        location = location.strip() or None
+    else:
+        location = None
+
+    score_threshold = coerce_float(score_threshold)
+    radius_km = coerce_float(radius_km)
+
     return {
-        "intents": cleaned_intents,
-        "entities": {
-            "topic": coerce_string_list(entities.get("topic")),
-            "source": coerce_string_list(entities.get("source")),
-            "category": coerce_string_list(entities.get("category")),
-            "location": coerce_string_list(entities.get("location")),
-            "score": coerce_score(entities.get("score"))
-        }
+        "endpointCandidates": endpoint_candidates,
+        "entities": normalized_entities,
+        "searchQuery": search_query,
+        "scoreThreshold": score_threshold,
+        "location": location,
+        "radiusKm": radius_km
     }
 
 
@@ -140,42 +181,59 @@ def lambda_handler(event, context):
     query_text = query_text.strip()
 
     system_prompt = f"""
-You are a query understanding service for a news system.
+You are a query understanding service for a contextual news retrieval system.
 
 Return ONLY valid JSON in this exact shape:
 {{
-  "intents": ["string"],
+  "endpointCandidates": ["string"],
   "entities": {{
-    "topic": ["string"],
-    "source": ["string"],
-    "category": ["string"],
-    "location": ["string"],
-    "score": 0.0
-  }}
+    "people": ["string"],
+    "organizations": ["string"],
+    "locations": ["string"],
+    "events": ["string"],
+    "sources": ["string"],
+    "categories": ["string"]
+  }},
+  "searchQuery": "string",
+  "scoreThreshold": 0.0,
+  "location": "string",
+  "radiusKm": 0.0
 }}
 
 Rules:
 - Output valid JSON only.
 - Do not wrap the JSON in markdown.
 - Do not return any extra fields.
-- intents must contain one or more values from:
-{json.dumps(ALLOWED_INTENTS)}
-- Do not invent any other intent values.
-- Multiple intents are allowed when needed.
-- Use "search" for topic/free-text queries derived from the user's input.
-- Use "source" when the query asks for a specific publisher/source.
-- Use "category" when the query asks for a category like technology, business, sports, general.
-- Use "score" when the query asks for high scoring / top relevance score / score threshold style retrieval.
-- Use "nearby" when the query includes a location-based nearby request.
-- Put topical search terms into entities.topic.
-- Put publisher names into entities.source.
-- Put category names into entities.category.
-- Put places/locations into entities.location.
-- Put a numeric threshold into entities.score only if the query clearly asks for a score cutoff.
-- If a field has no values, return an empty array for list fields and null for score.
+- endpointCandidates must contain one or more values from:
+{json.dumps(ALLOWED_ENDPOINTS)}
+- Do not invent any other endpoint names.
+- "category": use when the user asks for a specific category like Technology, Business, Sports, General.
+- "score": use when the user asks for highly relevant / top scored / above-threshold items by relevance score.
+- "search": use when the user asks about a topic, event, person, organization, or free-text subject that should be searched in title/description.
+- "source": use when the user asks for a particular publisher or source, such as Reuters or New York Times.
+- "nearby": use when the user asks for news near a location or includes location-based nearby intent.
+- Multiple endpointCandidates are allowed if the query implies filters in addition to the main retrieval style.
+- Put people names in entities.people.
+- Put company, publication, and organization names in entities.organizations unless they are clearly news publishers requested as filters, in which case also include them in entities.sources if appropriate.
+- Put place names in entities.locations.
+- Put named incidents/topics/acquisitions/tournaments/etc. in entities.events.
+- Put news publishers in entities.sources.
+- Put category names in entities.categories.
+- searchQuery should be the text query to use for the search endpoint. Use a concise query derived from the user's topic.
+- scoreThreshold should be numeric only when the user clearly requests a score cutoff; otherwise null.
+- location should be a single location string only when relevant for nearby retrieval; otherwise null.
+- radiusKm should be numeric only when the user clearly specifies a radius; otherwise null.
+
+Examples:
+- Query: "Latest developments in the Elon Musk Twitter acquisition near Palo Alto"
+  Return endpointCandidates including "nearby" and extract entities for Elon Musk, Twitter, Palo Alto.
+- Query: "Top technology news from the New York Times"
+  Return endpointCandidates including "category" and "source".
+- Query: "Show articles with relevance score above 0.7 about EVs"
+  Return endpointCandidates including "score" and "search".
 """
 
-    user_prompt = f"Classify this query and extract entities:\n\n{query_text}"
+    user_prompt = f"Analyze this user query for news retrieval:\n\n{query_text}"
 
     try:
         response = bedrock.converse(
@@ -196,7 +254,7 @@ Rules:
                 }
             ],
             inferenceConfig={
-                "maxTokens": 250,
+                "maxTokens": 350,
                 "temperature": 0,
                 "topP": 0.9
             }
@@ -212,4 +270,4 @@ Rules:
     except json.JSONDecodeError as exc:
         raise Exception(f"Model returned invalid JSON: {raw_text}") from exc
 
-    return validate_model_output(parsed)
+    return validate_model_output(parsed, query_text)
