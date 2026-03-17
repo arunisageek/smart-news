@@ -2,11 +2,65 @@
 
 This is a demo Project for Inshorts. 
 
-# Requirements
-It takes in news data in form of a file, parses it and stores it in database.
-User can give a input query in plain English language and must get new articles in return.
-System should understand the user's intent, extract out entities and concept from the query. Using these, most relevant news should be given back to the user for user's input query.
-Result given back to the user must also be enriched by using an LLM.
+## Requirements
+
+### Functional Requirements
+
+1. **LLM-based query understanding**
+   - Process the user’s news query using a publicly available LLM API.
+   - Extract relevant entities, concepts, and user intent from the query.
+   - Use the extracted intent to choose the most appropriate retrieval strategy.
+
+2. **News data ingestion**
+   - Load the provided news article JSON data into a database.
+   - Support storage in either SQL or NoSQL.
+
+3. **Supported retrieval modes**
+   - **category**: fetch articles for a specific category
+   - **score**: fetch articles above a relevance score threshold
+   - **search**: fetch articles using text search over title and description
+   - **source**: fetch articles from a specific source
+   - **nearby**: fetch articles within a given radius of the user’s location
+
+4. **Ranking logic**
+   - **category** and **source** results are ranked by publication date, most recent first
+   - **score** results are ranked by relevance score, highest first
+   - **search** results are ranked using a combination of relevance score and text match quality
+   - **nearby** results are ranked by distance from the user’s location
+
+5. **Result enrichment**
+   - Enrich returned articles with an LLM-generated summary
+
+6. **Response format**
+   - Return the top 5 most relevant articles
+   - Use a consistent JSON structure across all retrieval modes
+   - Each article should include:
+     - title
+     - description
+     - url
+     - publication_date
+     - source_name
+     - category
+     - relevance_score
+     - llm_summary
+     - latitude
+     - longitude
+
+### Bonus Requirement
+
+- Implement a location-based **Trending News Feed**
+- Simulate user interaction events such as views and clicks
+- Compute a trending score using interaction volume, recency, and geographic relevance
+- Add caching for trending feeds by location
+
+### API Design Requirements
+
+- Follow RESTful API design principles
+- Use versioned endpoints such as `/api/v1/news`
+- Accept user inputs through query parameters
+- For nearby search, accept `lat`, `lon`, and `radius`
+- Return proper HTTP status codes and informative error messages
+- Optionally include metadata such as total results, page number, and query used
 
 
 # High Level Design
