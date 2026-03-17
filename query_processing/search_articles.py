@@ -1,161 +1,244 @@
+import json
 import os
-from datetime import timezone
-
-import psycopg2
-
-
-DB_HOST = os.environ["DB_HOST"]
-DB_PORT = int(os.environ.get("DB_PORT", "5432"))
-DB_NAME = os.environ["DB_NAME"]
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-
-MAX_RESULTS = int(os.environ.get("MAX_RESULTS", "20"))
-ARTICLES_TABLE = os.environ.get("ARTICLES_TABLE", "articles")
-conn_uri = os.environ.get('POSTGRES_URI')
+import urllib.parse
+import urllib.request
+import urllib.error
 
 
-def get_connection():
-    return psycopg2.connect(conn_uri)
+BASE_URL = os.environ["RETRIEVE_BASE_URL"].rstrip("/")
+
+ENDPOINT_PATHS = {
+    "category": "/category",
+    "score": "/score",
+    "search": "/search",
+    "source": "/source",
+    "nearby": "/nearby"
+}
+
+DEFAULT_LIMIT = int(os.environ.get("DEFAULT_LIMIT", "20"))
+HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "10"))
 
 
-def clean_entities(entities):
-    if not isinstance(entities, list):
-        return []
+def clean_string(value):
+    if not isinstance(value, str):
+        return None
 
-    result = []
-    seen = set()
-
-    for item in entities:
-        if not isinstance(item, str):
-            continue
-
-        cleaned = item.strip()
-        if not cleaned:
-            continue
-
-        lowered = cleaned.lower()
-        if lowered in seen:
-            continue
-
-        seen.add(lowered)
-        result.append(cleaned)
-
-    return result
+    cleaned = value.strip()
+    return cleaned if cleaned else None
 
 
-def build_primary_search_text(query_text, entities):
-    cleaned_entities = clean_entities(entities)
-
-    if cleaned_entities:
-        return " ".join(cleaned_entities)
-
-    if isinstance(query_text, str) and query_text.strip():
-        return query_text.strip()
-
-    raise ValueError("At least one of queryText or entities must be present")
-
-
-def to_iso_utc(value):
+def coerce_float(value):
     if value is None:
         return None
 
-    if hasattr(value, "astimezone"):
-        return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if isinstance(value, (int, float)):
+        return float(value)
 
-    return str(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
 
-
-def execute_search(cursor, table_name, search_text, limit_value):
-    sql = f"""
-        WITH query_input AS (
-            SELECT websearch_to_tsquery('english', %s) AS ts_query
-        )
-        SELECT
-            a.id,
-            a.title,
-            COALESCE(NULLIF(a.llm_summary, ''), a.description) AS summary,
-            a.source_name,
-            a.publication_date,
-            a.url,
-            a.category,
-            a.relevance_score,
-            ts_rank_cd(a.search_document, q.ts_query) AS text_rank,
-            (
-                ts_rank_cd(a.search_document, q.ts_query) * 0.80
-                + COALESCE(a.relevance_score, 0) * 0.20
-            ) AS combined_score
-        FROM public.{table_name} a
-        CROSS JOIN query_input q
-        WHERE a.search_document @@ q.ts_query
-        ORDER BY combined_score DESC, a.publication_date DESC
-        LIMIT %s
-    """
-
-    cursor.execute(sql, (search_text, limit_value))
-    return cursor.fetchall()
+    return None
 
 
-def row_to_article(row):
-    return {
-        "articleId": str(row[0]),
-        "title": row[1] or "",
-        "summary": row[2] or "",
-        "source": row[3] or "",
-        "publishedAt": to_iso_utc(row[4]),
-        "url": row[5] or "",
-        "category": row[6] or [],
-        "relevanceScore": row[7] if row[7] is not None else 0,
-        "textRank": row[8] if row[8] is not None else 0,
-        "combinedScore": row[9] if row[9] is not None else 0
-    }
+def build_query_params(primary_endpoint, filters):
+    if not isinstance(filters, dict):
+        filters = {}
+
+    limit = filters.get("limit", DEFAULT_LIMIT)
+
+    if primary_endpoint == "category":
+        category = clean_string(filters.get("category"))
+        if not category:
+            raise ValueError("category endpoint requires filters.category")
+
+        params = {
+            "category": category,
+            "limit": limit
+        }
+
+        source = clean_string(filters.get("source"))
+        if source:
+            params["source"] = source
+
+        return params
+
+    if primary_endpoint == "score":
+        threshold = coerce_float(filters.get("min_score"))
+        if threshold is None:
+            raise ValueError("score endpoint requires filters.min_score")
+
+        params = {
+            "threshold": threshold,
+            "limit": limit
+        }
+
+        query = clean_string(filters.get("query"))
+        source = clean_string(filters.get("source"))
+        category = clean_string(filters.get("category"))
+
+        if query:
+            params["query"] = query
+        if source:
+            params["source"] = source
+        if category:
+            params["category"] = category
+
+        return params
+
+    if primary_endpoint == "search":
+        query = clean_string(filters.get("query"))
+        if not query:
+            raise ValueError("search endpoint requires filters.query")
+
+        params = {
+            "query": query,
+            "limit": limit
+        }
+
+        source = clean_string(filters.get("source"))
+        category = clean_string(filters.get("category"))
+        location = clean_string(filters.get("location"))
+
+        if source:
+            params["source"] = source
+        if category:
+            params["category"] = category
+        if location:
+            params["location"] = location
+
+        return params
+
+    if primary_endpoint == "source":
+        source = clean_string(filters.get("source"))
+        if not source:
+            raise ValueError("source endpoint requires filters.source")
+
+        params = {
+            "source": source,
+            "limit": limit
+        }
+
+        category = clean_string(filters.get("category"))
+        if category:
+            params["category"] = category
+
+        return params
+
+    if primary_endpoint == "nearby":
+        lat = coerce_float(filters.get("lat"))
+        lon = coerce_float(filters.get("lon"))
+        radius = coerce_float(filters.get("radius"))
+
+        if lat is None or lon is None or radius is None:
+            raise ValueError("nearby endpoint requires filters.lat, filters.lon, and filters.radius")
+
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "radius": radius,
+            "limit": limit
+        }
+
+        query = clean_string(filters.get("query"))
+        source = clean_string(filters.get("source"))
+        category = clean_string(filters.get("category"))
+
+        if query:
+            params["query"] = query
+        if source:
+            params["source"] = source
+        if category:
+            params["category"] = category
+
+        return params
+
+    raise ValueError(f"Unsupported primaryEndpoint: {primary_endpoint}")
+
+
+def build_url(primary_endpoint, query_params):
+    path = ENDPOINT_PATHS.get(primary_endpoint)
+    if not path:
+        raise ValueError(f"No path configured for endpoint: {primary_endpoint}")
+
+    encoded = urllib.parse.urlencode(query_params, doseq=True)
+    return f"{BASE_URL}{path}?{encoded}"
+
+
+def http_get_json(url):
+    request = urllib.request.Request(
+        url=url,
+        method="GET",
+        headers={
+            "Accept": "application/json"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            body = response.read().decode("utf-8")
+            status_code = response.getcode()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise Exception(f"Endpoint call failed with status {exc.code}: {body}")
+    except urllib.error.URLError as exc:
+        raise Exception(f"Endpoint call failed: {str(exc)}")
+
+    if status_code < 200 or status_code >= 300:
+        raise Exception(f"Endpoint call returned unexpected status {status_code}: {body}")
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise Exception(f"Endpoint returned invalid JSON: {body}") from exc
+
+
+def normalize_response(payload):
+    if isinstance(payload, list):
+        return {
+            "count": len(payload),
+            "articles": payload
+        }
+
+    if isinstance(payload, dict):
+        articles = payload.get("articles")
+        if isinstance(articles, list):
+            return {
+                "count": len(articles),
+                "articles": articles
+            }
+
+    raise ValueError("Endpoint response must be either a list or an object with an 'articles' list")
 
 
 def lambda_handler(event, context):
     query_id = event.get("queryId")
     query_text = event.get("queryText")
-    intent = event.get("intent")
-    entities = event.get("entities", [])
+    primary_endpoint = event.get("primaryEndpoint")
+    filters = event.get("filters", {})
 
     if not isinstance(query_id, str) or not query_id.strip():
         raise ValueError("queryId is required")
 
-    if query_text is not None and not isinstance(query_text, str):
-        raise ValueError("queryText must be a string if provided")
+    if not isinstance(query_text, str) or not query_text.strip():
+        raise ValueError("queryText is required")
 
-    if intent is not None and not isinstance(intent, str):
-        raise ValueError("intent must be a string if provided")
+    if not isinstance(primary_endpoint, str) or not primary_endpoint.strip():
+        raise ValueError("primaryEndpoint is required")
 
-    cleaned_entities = clean_entities(entities)
-    primary_search_text = build_primary_search_text(query_text, cleaned_entities)
+    primary_endpoint = primary_endpoint.strip().lower()
 
-    connection = None
-    cursor = None
+    query_params = build_query_params(primary_endpoint, filters)
+    url = build_url(primary_endpoint, query_params)
+    payload = http_get_json(url)
+    normalized = normalize_response(payload)
 
-    try:
-        connection = get_connection()
-        cursor = connection.cursor()
-
-        rows = execute_search(cursor, ARTICLES_TABLE, primary_search_text, MAX_RESULTS)
-
-        if not rows and cleaned_entities and isinstance(query_text, str) and query_text.strip():
-            fallback_search_text = query_text.strip()
-
-            if fallback_search_text != primary_search_text:
-                rows = execute_search(cursor, ARTICLES_TABLE, fallback_search_text, MAX_RESULTS)
-
-        articles = [row_to_article(row) for row in rows]
-
-        return {
-            "count": len(articles),
-            "articles": articles
-        }
-
-    except Exception as exc:
-        raise Exception(f"Failed to search articles: {str(exc)}")
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if connection is not None:
-            connection.close()
+    return {
+        "count": normalized["count"],
+        "articles": normalized["articles"]
+    }
